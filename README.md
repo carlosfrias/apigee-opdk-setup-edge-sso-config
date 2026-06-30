@@ -1,74 +1,75 @@
-Apigee OPDK Setup Edge SSO
-=========
+# apigee-opdk-setup-edge-sso-config — Apigee Edge SAML SSO Configuration (Dual-Keypair)
 
-This role will setup the Edge SSO component of the Apigee Edge platform.  
+> **An Ansible role that configures the `apigee-sso` SAML component of Apigee Edge** — generating the dual keypair (JWT signing + SAML service-provider), binding the IdP metadata, and rendering the `apigee-sso` installer response file.
 
-Requirements
-------------
-
-This role requires elevated privilege to install OpenSSL.  
-
-Role Variables
---------------
-
-| Variable Name | Description |
-| --- | --- |
-| edge_sso_installation_config_filename | edge-sso-installer-config.conf |
-| edge_sso_installation_config_file | "{{ opdk_resources_path }}/{{ edge_sso_installation_config_filename }}" |
-| jwt_key_folder | "{{ apigee_home }}/customer/application/apigee-sso/jwt-keys" |
-| jwt_private_key | private_key.pem |
-| sso_jwt_signinig_key_filepath | "{{ jwt_key_folder }}/{{ jwt_private_key }}" |
-| jwt_public_key | public_key.pem |
-| sso_jwt_verification_key_filepath | "{{ jwt_key_folder }}/{{ jwt_public_key }}" |
-| jwt_key_size | 2048 |
-| saml_folder | "{{ apigee_home }}/customer/application/apigee-sso/saml" |
-| sso_saml_service_provider_key_filename | server.key |
-| sso_saml_service_provider_key | "{{ saml_folder }}/{{ sso_saml_service_provider_key_filename}}" |
-| saml_private_encryption_type | aes256 |
-| saml_private_key_size | 1024 |
-| saml_cert_signing_request | server.csr |
-| sso_saml_service_provider_certificate_filename | server.crt |
-| sso_saml_service_provider_certificate | "{{ saml_folder }}/{{ sso_saml_service_provider_certificate_filename }}" |
-| saml_cert_encryption_type | sha256 |
-| saml_cert_expiry_days | 365 |
-| saml_cert_subject | "/C=US/O=google/OU=apigee/CN=apigee.com" |
-| sso_saml_idp_metadata_url | "{{ saml_folder }}/target_idp_metadata_url.xml" |
-
-
-Dependencies
-------------
-
-* apigee-opdk-setup-default-settings
-* apigee-opdk-modules
-
-Example Playbook
-----------------
-
-Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
-
-    - hosts: servers
-      roles:
-         - { role: apigee-opdk-setup-edge-sso-config }
-
-License
--------
-
-Apache 2.0
-
-Author Information
-------------------
-
-Carlos Frias
-
+A SAML SSO bootstrap procedure expressed as code: knowing **why Apigee SSO uses two independent keypairs**, **how the Edge UI becomes an OAuth client of `apigee-sso`**, and **how to bind an IdP by metadata file *or* URL**.
 
 <!-- BEGIN Google Required Disclaimer -->
 
-# Not Google Product Clause
+## Not Google Product Clause
 
 This is not an officially supported Google product.
 <!-- END Google Required Disclaimer -->
-<!-- BEGIN Google How To Contribute -->
-# How to Contribute
 
-We'd love to accept your patches and contributions to this project. Please review our [guidelines](CONTRIBUTING.md).
-<!-- END Google How To Contribute -->
+---
+
+## Why this role is notable
+
+- **Dual-keypair architecture, handled correctly.** Apigee SSO uses **two independent keypairs** — a JWT signing/verification keypair (for the Edge UI ↔ `apigee-sso` OAuth exchange) and a SAML service-provider key/cert (for the SP side of the SAML assertion). Conflating them is a common error this role prevents.
+- **IdP binding flexibility.** Bind the IdP by **metadata URL** *or* by **local metadata file** (rewritten to a `file://` URL) — necessary for air-gapped or self-signed-IdP environments.
+- **Deliberate escape hatch.** `SSO_SAML_IDPMETAURL_SKIPSSLVALIDATION` is surfaced as an opt-in escape hatch for self-signed IdP certs — not a hardcoded workaround.
+- **Response-file-driven install.** Configuration is a rendered response file consumed by `apigee-setup install` — the Apigee installer contract, not raw imperative commands.
+
+---
+
+## What the role actually does
+
+`tasks/main.yml` produces a complete `apigee-sso` configuration:
+
+1. **Cache the key/cert paths** (cacheable facts for downstream install roles).
+2. **Generate the SAML service-provider keypair + self-signed certificate** — `create-saml-keys-cert.yml`.
+3. **Generate the JWT signing + verification keypair** — `create-jwt-keys.yml`.
+4. **Bind the IdP metadata** — if a local metadata file is provided, copy it into place and set `SSO_SAML_IDP_METADATA_URL` to a `file://` URL (so `apigee-sso` reads the metadata locally instead of fetching from an HTTPS endpoint).
+5. **Render the installer response file** — `templates/edge-sso-installer-config.conf.j2`.
+
+The template exposes the non-obvious `apigee-sso` contract: `SSO_PROFILE=saml`, separate `SSO_JWT_SIGNINIG_KEY_FILEPATH` / `SSO_JWT_VERIFICATION_KEY_FILEPATH`, `SSO_SAML_SERVICE_PROVIDER_KEY` / `SSO_SAML_SERVICE_PROVIDER_CERTIFICATE`, `SSO_SAML_IDP_METADATA_URL`, and the `SSO_SAML_IDPMETAURL_SKIPSSLVALIDATION` escape hatch for self-signed IdP certs.
+
+---
+
+## Capabilities — what this credentials
+
+> Ansible is the medium. The engineering below is the evidence of the expertise applied.
+
+- **SAML SSO architecture** — Apigee Edge SSO uses two independent keypairs (JWT signing/verification + SAML service-provider key/cert); the role provisions both halves of the trust.
+- **IdP binding flexibility** — bind by metadata URL *or* by local metadata file (rewritten to a `file://` URL) for air-gapped/self-signed-IdP environments.
+- **Self-signed-IdP escape hatch** — `SSO_SAML_IDPMETAURL_SKIPSSLVALIDATION` surfaced as a deliberate, opt-in escape hatch.
+- **Edge UI as OAuth client** — the JWT keypair exists because the Edge UI acts as an OAuth client of `apigee-sso`.
+- **Response-file-driven install** — configuration is a rendered response file consumed by `apigee-setup install`.
+
+---
+
+---
+
+## Role variables (selected)
+
+| Variable | Purpose |
+|----------|---------|
+| `sso_profile` | SSO profile (defaults to `saml`) |
+| `sso_saml_service_provider_key_file_path` / `sso_saml_service_provider_certificate_file_path` | SAML SP key + cert |
+| `sso_jwt_signinig_key_file_path` / `sso_jwt_verification_key_file_path` | JWT signing + verification keys |
+| `sso_saml_idp_metadata_url` | IdP metadata URL (or `file://…` when a local file is supplied) |
+| `sso_saml_idp_metadata_local_file_name` | Local IdP metadata file to copy into place (optional — triggers `file://` binding) |
+| `sso_saml_idpmetaurl_skipsslvalidation` | Skip SSL validation of the IdP metadata URL (escape hatch, defaults to `n`) |
+| `sso_saml_ipd_name` / `sso_saml_ipd_login_text` | IdP display name + login link text |
+
+---
+
+## Provenance
+
+Authored and maintained by **Carlos Frias** during his tenure on Apigee Edge Private Cloud. Part of the `apigee-opdk-*` role corpus; the SAML/TLS expertise is aggregated in the [`apigee-edge-opdk`](https://github.com/carlosfrias/apigee-edge-opdk) framework.
+
+Contributions welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## License
+
+See [LICENSE](./LICENSE).
